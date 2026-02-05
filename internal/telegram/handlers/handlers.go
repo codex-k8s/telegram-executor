@@ -15,6 +15,7 @@ import (
 
 	"github.com/codex-k8s/telegram-executor/internal/executions"
 	"github.com/codex-k8s/telegram-executor/internal/i18n"
+	"github.com/codex-k8s/telegram-executor/internal/telegram/shared"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
 )
@@ -409,17 +410,7 @@ func (h *Handler) sendWebhook(ctx context.Context, exec *executions.Execution, r
 }
 
 func (h *Handler) messageFor(lang string) i18n.Messages {
-	lang = strings.ToLower(strings.TrimSpace(lang))
-	if lang == "" {
-		lang = h.defaultLang
-	}
-	if msg, ok := h.messages[lang]; ok {
-		return msg
-	}
-	if msg, ok := h.messages["en"]; ok {
-		return msg
-	}
-	return i18n.Messages{}
+	return shared.MessagesFor(h.messages, lang, h.defaultLang)
 }
 
 func (h *Handler) noteForResult(msg i18n.Messages, result executions.Result, timeoutMessage string) string {
@@ -485,35 +476,8 @@ func parseMode(markup string) string {
 func renderModeText(value, mode string) string {
 	switch mode {
 	case telego.ModeHTML:
-		return escapeHTML(value)
+		return shared.EscapeHTML(value)
 	default:
-		return escapeMarkdownV2(value)
+		return shared.EscapeMarkdownV2(value)
 	}
-}
-
-func escapeHTML(value string) string {
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&#39;",
-	)
-	return replacer.Replace(value)
-}
-
-func escapeMarkdownV2(value string) string {
-	if value == "" {
-		return value
-	}
-	var builder strings.Builder
-	builder.Grow(len(value) * 2)
-	for _, r := range value {
-		switch r {
-		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\':
-			builder.WriteByte('\\')
-		}
-		builder.WriteRune(r)
-	}
-	return builder.String()
 }

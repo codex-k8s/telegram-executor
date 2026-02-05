@@ -12,6 +12,7 @@ import (
 	"github.com/codex-k8s/telegram-executor/internal/executions"
 	"github.com/codex-k8s/telegram-executor/internal/i18n"
 	"github.com/codex-k8s/telegram-executor/internal/telegram/handlers"
+	"github.com/codex-k8s/telegram-executor/internal/telegram/shared"
 	"github.com/codex-k8s/telegram-executor/internal/telegram/updates"
 	"github.com/mymmrac/telego"
 	tu "github.com/mymmrac/telego/telegoutil"
@@ -203,17 +204,7 @@ func (s *Service) scheduleTimeout(correlationID string, timeout time.Duration, t
 }
 
 func (s *Service) messagesFor(lang string) i18n.Messages {
-	lang = strings.ToLower(strings.TrimSpace(lang))
-	if lang == "" {
-		lang = s.lang
-	}
-	if msg, ok := s.messages[lang]; ok {
-		return msg
-	}
-	if msg, ok := s.messages["en"]; ok {
-		return msg
-	}
-	return i18n.Messages{}
+	return shared.MessagesFor(s.messages, lang, s.lang)
 }
 
 func parseMode(markup string) string {
@@ -226,180 +217,152 @@ func parseMode(markup string) string {
 }
 
 func renderMarkdown(msg i18n.Messages, req executions.Request) string {
-	builder := &strings.Builder{}
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(msg.ExecutionTitle))
-	builder.WriteString("*\n\n")
-
-	contextTitle := msg.SectionContext
-	if strings.TrimSpace(contextTitle) == "" {
-		contextTitle = "Context"
-	}
-	actionTitle := msg.SectionAction
-	if strings.TrimSpace(actionTitle) == "" {
-		actionTitle = "Action"
-	}
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(contextTitle))
-	builder.WriteString("*\n")
-
-	questionLabel := msg.QuestionLabel
-	if strings.TrimSpace(questionLabel) == "" {
-		questionLabel = "Question"
-	}
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(questionLabel))
-	builder.WriteString(":* ")
-	builder.WriteString(escapeMarkdownV2(req.Question))
-	builder.WriteString("\n")
-
-	if strings.TrimSpace(req.Context) != "" {
-		contextLabel := msg.ContextLabel
-		if strings.TrimSpace(contextLabel) == "" {
-			contextLabel = "Context"
-		}
-		builder.WriteString("*")
-		builder.WriteString(escapeMarkdownV2(contextLabel))
-		builder.WriteString(":* ")
-		builder.WriteString(escapeMarkdownV2(req.Context))
-		builder.WriteString("\n")
-	}
-
-	optionsLabel := msg.OptionsLabel
-	if strings.TrimSpace(optionsLabel) == "" {
-		optionsLabel = "Options"
-	}
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(optionsLabel))
-	builder.WriteString(":*\n")
-	for idx, option := range req.Options {
-		builder.WriteString(fmt.Sprintf("%d\\) %s\n", idx+1, escapeMarkdownV2(option)))
-	}
-	builder.WriteString("\n")
-
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(actionTitle))
-	builder.WriteString("*\n")
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(msg.ExecutionTool))
-	builder.WriteString(":* `")
-	builder.WriteString(escapeMarkdownV2Code(req.Tool.Name))
-	builder.WriteString("`\n")
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(msg.ExecutionCorrelation))
-	builder.WriteString(":* `")
-	builder.WriteString(escapeMarkdownV2Code(req.CorrelationID))
-	builder.WriteString("`")
-	return builder.String()
+	return renderExecution(msg, req, markdownExecutionWriter{})
 }
 
 func renderHTML(msg i18n.Messages, req executions.Request) string {
+	return renderExecution(msg, req, htmlExecutionWriter{})
+}
+
+func renderExecution(msg i18n.Messages, req executions.Request, writer executionMessageWriter) string {
+	labels := executionLabelsFor(msg)
 	builder := &strings.Builder{}
-	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(msg.ExecutionTitle))
-	builder.WriteString("</b><br><br>")
+	writer.WriteTitle(builder, msg.ExecutionTitle)
 
-	contextTitle := msg.SectionContext
-	if strings.TrimSpace(contextTitle) == "" {
-		contextTitle = "Context"
-	}
-	actionTitle := msg.SectionAction
-	if strings.TrimSpace(actionTitle) == "" {
-		actionTitle = "Action"
-	}
-	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(contextTitle))
-	builder.WriteString("</b><br>")
-
-	questionLabel := msg.QuestionLabel
-	if strings.TrimSpace(questionLabel) == "" {
-		questionLabel = "Question"
-	}
-	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(questionLabel))
-	builder.WriteString(":</b> ")
-	builder.WriteString(htmlEscape(req.Question))
-	builder.WriteString("<br>")
+	writer.WriteSectionHeader(builder, labels.ContextTitle)
+	writer.WriteLabelValue(builder, labels.QuestionLabel, req.Question, false)
 
 	if strings.TrimSpace(req.Context) != "" {
-		contextLabel := msg.ContextLabel
-		if strings.TrimSpace(contextLabel) == "" {
-			contextLabel = "Context"
-		}
-		builder.WriteString("<b>")
-		builder.WriteString(htmlEscape(contextLabel))
-		builder.WriteString(":</b> ")
-		builder.WriteString(htmlEscape(req.Context))
-		builder.WriteString("<br>")
+		writer.WriteLabelValue(builder, labels.ContextLabel, req.Context, false)
 	}
 
-	optionsLabel := msg.OptionsLabel
-	if strings.TrimSpace(optionsLabel) == "" {
-		optionsLabel = "Options"
+	writer.WriteOptions(builder, labels.OptionsLabel, req.Options)
+
+	writer.WriteSectionHeader(builder, labels.ActionTitle)
+	writer.WriteCodeValue(builder, msg.ExecutionTool, req.Tool.Name, false)
+	writer.WriteCodeValue(builder, msg.ExecutionCorrelation, req.CorrelationID, false)
+	return builder.String()
+}
+
+type executionMessageWriter interface {
+	WriteTitle(builder *strings.Builder, title string)
+	WriteSectionHeader(builder *strings.Builder, title string)
+	WriteLabelValue(builder *strings.Builder, label, value string, addEmptyLine bool)
+	WriteOptions(builder *strings.Builder, label string, options []string)
+	WriteCodeValue(builder *strings.Builder, label, value string, addEmptyLine bool)
+}
+
+type markdownExecutionWriter struct{}
+
+func (markdownExecutionWriter) WriteTitle(builder *strings.Builder, title string) {
+	builder.WriteString("*")
+	builder.WriteString(shared.EscapeMarkdownV2(title))
+	builder.WriteString("*\n\n")
+}
+
+func (markdownExecutionWriter) WriteSectionHeader(builder *strings.Builder, title string) {
+	builder.WriteString("*")
+	builder.WriteString(shared.EscapeMarkdownV2(title))
+	builder.WriteString("*\n")
+}
+
+func (markdownExecutionWriter) WriteLabelValue(builder *strings.Builder, label, value string, addEmptyLine bool) {
+	builder.WriteString("*")
+	builder.WriteString(shared.EscapeMarkdownV2(label))
+	builder.WriteString(":* ")
+	builder.WriteString(shared.EscapeMarkdownV2(value))
+	builder.WriteString("\n")
+	appendOptionalLineBreak(builder, "\n", addEmptyLine)
+}
+
+func (markdownExecutionWriter) WriteOptions(builder *strings.Builder, label string, options []string) {
+	builder.WriteString("*")
+	builder.WriteString(shared.EscapeMarkdownV2(label))
+	builder.WriteString(":*\n")
+	for idx, option := range options {
+		builder.WriteString(fmt.Sprintf("%d\\) %s\n", idx+1, shared.EscapeMarkdownV2(option)))
 	}
+	builder.WriteString("\n")
+}
+
+func (markdownExecutionWriter) WriteCodeValue(builder *strings.Builder, label, value string, addEmptyLine bool) {
+	builder.WriteString("*")
+	builder.WriteString(shared.EscapeMarkdownV2(label))
+	builder.WriteString(":* `")
+	builder.WriteString(shared.EscapeMarkdownV2Code(value))
+	builder.WriteString("`\n")
+	appendOptionalLineBreak(builder, "\n", addEmptyLine)
+}
+
+type htmlExecutionWriter struct{}
+
+func (htmlExecutionWriter) WriteTitle(builder *strings.Builder, title string) {
 	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(optionsLabel))
+	builder.WriteString(shared.EscapeHTML(title))
+	builder.WriteString("</b><br><br>")
+}
+
+func (htmlExecutionWriter) WriteSectionHeader(builder *strings.Builder, title string) {
+	builder.WriteString("<b>")
+	builder.WriteString(shared.EscapeHTML(title))
+	builder.WriteString("</b><br>")
+}
+
+func (htmlExecutionWriter) WriteLabelValue(builder *strings.Builder, label, value string, addEmptyLine bool) {
+	builder.WriteString("<b>")
+	builder.WriteString(shared.EscapeHTML(label))
+	builder.WriteString(":</b> ")
+	builder.WriteString(shared.EscapeHTML(value))
+	builder.WriteString("<br>")
+	appendOptionalLineBreak(builder, "<br>", addEmptyLine)
+}
+
+func (htmlExecutionWriter) WriteOptions(builder *strings.Builder, label string, options []string) {
+	builder.WriteString("<b>")
+	builder.WriteString(shared.EscapeHTML(label))
 	builder.WriteString(":</b><br>")
-	for idx, option := range req.Options {
-		builder.WriteString(fmt.Sprintf("%d) %s<br>", idx+1, htmlEscape(option)))
+	for idx, option := range options {
+		builder.WriteString(fmt.Sprintf("%d) %s<br>", idx+1, shared.EscapeHTML(option)))
 	}
 	builder.WriteString("<br>")
+}
 
+func (htmlExecutionWriter) WriteCodeValue(builder *strings.Builder, label, value string, addEmptyLine bool) {
 	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(actionTitle))
-	builder.WriteString("</b><br>")
-	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(msg.ExecutionTool))
+	builder.WriteString(shared.EscapeHTML(label))
 	builder.WriteString(":</b> <code>")
-	builder.WriteString(htmlEscape(req.Tool.Name))
+	builder.WriteString(shared.EscapeHTML(value))
 	builder.WriteString("</code><br>")
-	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(msg.ExecutionCorrelation))
-	builder.WriteString(":</b> <code>")
-	builder.WriteString(htmlEscape(req.CorrelationID))
-	builder.WriteString("</code>")
-	return builder.String()
+	appendOptionalLineBreak(builder, "<br>", addEmptyLine)
 }
 
-func htmlEscape(value string) string {
-	replacer := strings.NewReplacer(
-		"&", "&amp;",
-		"<", "&lt;",
-		">", "&gt;",
-		`"`, "&quot;",
-		"'", "&#39;",
-	)
-	return replacer.Replace(value)
+func appendOptionalLineBreak(builder *strings.Builder, lineBreak string, enabled bool) {
+	if enabled {
+		builder.WriteString(lineBreak)
+	}
 }
 
-func escapeMarkdownV2(value string) string {
-	if value == "" {
-		return value
-	}
-	var builder strings.Builder
-	builder.Grow(len(value) * 2)
-	for _, r := range value {
-		switch r {
-		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\':
-			builder.WriteByte('\\')
-		}
-		builder.WriteRune(r)
-	}
-	return builder.String()
+type executionLabels struct {
+	ContextTitle  string
+	ActionTitle   string
+	QuestionLabel string
+	ContextLabel  string
+	OptionsLabel  string
 }
 
-func escapeMarkdownV2Code(value string) string {
-	if value == "" {
-		return value
+func executionLabelsFor(msg i18n.Messages) executionLabels {
+	return executionLabels{
+		ContextTitle:  fallbackText(msg.SectionContext, "Context"),
+		ActionTitle:   fallbackText(msg.SectionAction, "Action"),
+		QuestionLabel: fallbackText(msg.QuestionLabel, "Question"),
+		ContextLabel:  fallbackText(msg.ContextLabel, "Context"),
+		OptionsLabel:  fallbackText(msg.OptionsLabel, "Options"),
 	}
-	var builder strings.Builder
-	builder.Grow(len(value) * 2)
-	for _, r := range value {
-		switch r {
-		case '\\', '`':
-			builder.WriteByte('\\')
-		}
-		builder.WriteRune(r)
+}
+
+func fallbackText(value, fallback string) string {
+	if strings.TrimSpace(value) == "" {
+		return fallback
 	}
-	return builder.String()
+	return value
 }
