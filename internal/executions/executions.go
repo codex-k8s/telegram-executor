@@ -45,7 +45,6 @@ type Request struct {
 	Context       string
 	Options       []string
 	AllowCustom   bool
-	CustomLabel   string
 	Lang          string
 	Markup        string
 	Callback      Callback

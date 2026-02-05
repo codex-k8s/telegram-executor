@@ -156,10 +156,7 @@ func (s *Service) optionsKeyboard(req executions.Request) *telego.InlineKeyboard
 		))
 	}
 	if req.AllowCustom {
-		customLabel := strings.TrimSpace(req.CustomLabel)
-		if customLabel == "" {
-			customLabel = msg.CustomOptionButton
-		}
+		customLabel := strings.TrimSpace(msg.CustomOptionButton)
 		if customLabel == "" {
 			customLabel = "Custom option"
 		}

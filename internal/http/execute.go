@@ -82,7 +82,7 @@ func (h *ExecuteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	question, contextValue, options, allowCustom, customLabel, err := parseFeedbackArgs(req.Arguments, req.Spec, req.Lang, h.cfg.Lang)
+	question, contextValue, options, allowCustom, err := parseFeedbackArgs(req.Arguments, req.Spec)
 	if err != nil {
 		h.respond(w, http.StatusBadRequest, executions.StatusError, err.Error())
 		return
@@ -103,7 +103,6 @@ func (h *ExecuteHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Context:       contextValue,
 		Options:       options,
 		AllowCustom:   allowCustom,
-		CustomLabel:   customLabel,
 		Lang:          req.Lang,
 		Markup:        req.Markup,
 		Callback:      *req.Callback,
@@ -129,24 +128,24 @@ func (h *ExecuteHandler) respond(w http.ResponseWriter, statusCode int, status e
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func parseFeedbackArgs(arguments map[string]any, spec map[string]any, requestLang, fallbackLang string) (question, contextValue string, options []string, allowCustom bool, customLabel string, err error) {
+func parseFeedbackArgs(arguments map[string]any, spec map[string]any) (question, contextValue string, options []string, allowCustom bool, err error) {
 	question, ok := extractString(arguments, "question")
 	if !ok {
-		return "", "", nil, false, "", fmt.Errorf("question is required")
+		return "", "", nil, false, fmt.Errorf("question is required")
 	}
 	if len([]rune(question)) < 10 || len([]rune(question)) > 1000 {
-		return "", "", nil, false, "", fmt.Errorf("question must be 10-1000 characters")
+		return "", "", nil, false, fmt.Errorf("question must be 10-1000 characters")
 	}
 
 	contextValue, _ = extractString(arguments, "context")
 	if len([]rune(contextValue)) > 2000 {
-		return "", "", nil, false, "", fmt.Errorf("context must be <= 2000 characters")
+		return "", "", nil, false, fmt.Errorf("context must be <= 2000 characters")
 	}
 
 	minOptions, maxOptions := optionLimitsFromSpec(spec)
 	options, err = extractOptions(arguments, minOptions, maxOptions)
 	if err != nil {
-		return "", "", nil, false, "", err
+		return "", "", nil, false, err
 	}
 
 	allowCustom = true
@@ -156,47 +155,7 @@ func parseFeedbackArgs(arguments map[string]any, spec map[string]any, requestLan
 	if value, ok := extractBool(arguments, "allow_custom"); ok {
 		allowCustom = value
 	}
-	customLabel = customOptionLabelFromSpec(spec, requestLang, fallbackLang)
-	return question, contextValue, options, allowCustom, customLabel, nil
-}
-
-func customOptionLabelFromSpec(spec map[string]any, requestLang, fallbackLang string) string {
-	if spec == nil {
-		return ""
-	}
-	raw, ok := spec["custom_option_label"]
-	if !ok || raw == nil {
-		return ""
-	}
-	switch value := raw.(type) {
-	case string:
-		return strings.TrimSpace(value)
-	case map[string]any:
-		return customOptionLabelFromMap(value, requestLang, fallbackLang)
-	default:
-		return ""
-	}
-}
-
-func customOptionLabelFromMap(labels map[string]any, requestLang, fallbackLang string) string {
-	requestLang = normalizeLang(requestLang, fallbackLang)
-	fallbackLang = normalizeLang(fallbackLang, "en")
-
-	for _, key := range []string{requestLang, fallbackLang, "en", "ru", "default"} {
-		raw, ok := labels[key]
-		if !ok || raw == nil {
-			continue
-		}
-		value, ok := raw.(string)
-		if !ok {
-			continue
-		}
-		value = strings.TrimSpace(value)
-		if value != "" {
-			return value
-		}
-	}
-	return ""
+	return question, contextValue, options, allowCustom, nil
 }
 
 func optionLimitsFromSpec(spec map[string]any) (int, int) {

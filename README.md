@@ -80,8 +80,7 @@ Request example:
   "spec": {
     "kind": "telegram_feedback_v1",
     "options_min": 2,
-    "options_max": 5,
-    "custom_option_label": "Custom option"
+    "options_max": 5
   },
   "lang": "en",
   "markup": "markdown",
@@ -122,6 +121,7 @@ Success example:
 ```
 
 Custom voice/text example has `custom=true` and `input_mode` set to `text` or `voice`.
+Button label for custom option is fully controlled by `telegram-executor` i18n (`TG_EXECUTOR_LANG` or request `lang`).
 
 Error example:
 
