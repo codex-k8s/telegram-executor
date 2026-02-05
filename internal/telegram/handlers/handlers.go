@@ -318,10 +318,12 @@ func (h *Handler) startCustomPrompt(ctx context.Context, query *telego.CallbackQ
 		_ = h.DeleteMessage(ctx, prevPromptID)
 	}
 	msg := h.messageFor(exec.Request.Lang)
+	mode := parseMode(exec.Request.Markup)
+	promptText := renderModeText(msg.CustomPrompt, mode)
 	prompt, err := h.bot.SendMessage(ctx, &telego.SendMessageParams{
 		ChatID:    tu.ID(h.chatID),
-		Text:      msg.CustomPrompt,
-		ParseMode: parseMode(exec.Request.Markup),
+		Text:      promptText,
+		ParseMode: mode,
 		ReplyParameters: (&telego.ReplyParameters{
 			MessageID: exec.MessageID,
 		}).WithAllowSendingWithoutReply(),
@@ -348,6 +350,8 @@ func (h *Handler) cancelCustomPrompt(ctx context.Context, query *telego.Callback
 func (h *Handler) FinalizeExecution(ctx context.Context, exec *executions.Execution, result executions.Result, timeoutMessage string) {
 	msg := h.messageFor(exec.Request.Lang)
 	note := h.noteForResult(msg, result, timeoutMessage)
+	mode := parseMode(exec.Request.Markup)
+	note = renderModeText(note, mode)
 	text := exec.MessageText
 	if strings.TrimSpace(note) != "" {
 		text = fmt.Sprintf("%s\n\n%s", exec.MessageText, note)
@@ -356,7 +360,7 @@ func (h *Handler) FinalizeExecution(ctx context.Context, exec *executions.Execut
 		ChatID:      tu.ID(h.chatID),
 		MessageID:   exec.MessageID,
 		Text:        text,
-		ParseMode:   parseMode(exec.Request.Markup),
+		ParseMode:   mode,
 		ReplyMarkup: h.resolvedKeyboard(exec.Request.Lang, exec.MessageID),
 	})
 	if err != nil {
@@ -476,4 +480,40 @@ func parseMode(markup string) string {
 	default:
 		return telego.ModeMarkdownV2
 	}
+}
+
+func renderModeText(value, mode string) string {
+	switch mode {
+	case telego.ModeHTML:
+		return escapeHTML(value)
+	default:
+		return escapeMarkdownV2(value)
+	}
+}
+
+func escapeHTML(value string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;",
+		"<", "&lt;",
+		">", "&gt;",
+		`"`, "&quot;",
+		"'", "&#39;",
+	)
+	return replacer.Replace(value)
+}
+
+func escapeMarkdownV2(value string) string {
+	if value == "" {
+		return value
+	}
+	var builder strings.Builder
+	builder.Grow(len(value) * 2)
+	for _, r := range value {
+		switch r {
+		case '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!', '\\':
+			builder.WriteByte('\\')
+		}
+		builder.WriteRune(r)
+	}
+	return builder.String()
 }
