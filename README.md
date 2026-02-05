@@ -1,1 +1,155 @@
-# telegram-executor
+<div align="center">
+  <img src="docs/media/logo.png" alt="telegram-executor logo" width="120" height="120" />
+  <h1>telegram-executor</h1>
+  <p>💬 Telegram async executor for <code>yaml-mcp-server</code>: asks user to choose one of 2-5 options (or send custom text/voice).</p>
+</div>
+
+![Go Version](https://img.shields.io/github/go-mod/go-version/codex-k8s/telegram-executor)
+[![Go Reference](https://pkg.go.dev/badge/github.com/codex-k8s/telegram-executor.svg)](https://pkg.go.dev/github.com/codex-k8s/telegram-executor)
+
+🇷🇺 Русская версия: [README_RU.md](README_RU.md)
+
+## What it does
+
+`telegram-executor` receives async execute requests from `yaml-mcp-server`, sends a Telegram message with options, waits for user selection, and sends webhook callback back to `yaml-mcp-server`.
+
+Supported flow:
+- choose one predefined option (2..5)
+- choose `Custom option` and reply with text or voice
+- timeout handling with callback `status=error`
+
+## Request flow
+
+1. `yaml-mcp-server` calls `POST /execute` and gets `202 Accepted`.
+2. `telegram-executor` sends a Telegram message with option buttons.
+3. User clicks an option or sends custom text/voice.
+4. `telegram-executor` sends callback to `yaml-mcp-server` webhook URL.
+
+## Installation
+
+Requirements: Go >= 1.25.5.
+
+```bash
+go install github.com/codex-k8s/telegram-executor/cmd/telegram-executor@latest
+```
+
+## Environment variables
+
+All variables are prefixed with `TG_EXECUTOR_`:
+
+- `TG_EXECUTOR_TOKEN` - Telegram bot token (required)
+- `TG_EXECUTOR_CHAT_ID` - allowed Telegram chat id (required)
+- `TG_EXECUTOR_HTTP_HOST` - HTTP listen host (required)
+- `TG_EXECUTOR_HTTP_PORT` - HTTP listen port (default `8080`)
+- `TG_EXECUTOR_LANG` - message language (`en`/`ru`, default `en`)
+- `TG_EXECUTOR_EXECUTION_TIMEOUT` - max wait time (default `1h`)
+- `TG_EXECUTOR_TIMEOUT_MESSAGE` - custom timeout note in Telegram (optional)
+- `TG_EXECUTOR_WEBHOOK_URL` - Telegram webhook URL (optional)
+- `TG_EXECUTOR_WEBHOOK_SECRET` - Telegram webhook secret (optional)
+- `TG_EXECUTOR_OPENAI_API_KEY` - OpenAI API key for voice transcription (optional)
+- `TG_EXECUTOR_STT_MODEL` - STT model (default `gpt-4o-mini-transcribe`)
+- `TG_EXECUTOR_STT_TIMEOUT` - STT timeout (default `30s`)
+- `TG_EXECUTOR_LOG_LEVEL` - `debug|info|warn|error`
+- `TG_EXECUTOR_SHUTDOWN_TIMEOUT` - graceful shutdown timeout (default `10s`)
+
+Webhook mode is enabled only when both `TG_EXECUTOR_WEBHOOK_URL` and `TG_EXECUTOR_WEBHOOK_SECRET` are set.
+
+## API
+
+### POST /execute
+
+Request example:
+
+```json
+{
+  "correlation_id": "req-123",
+  "tool": {
+    "name": "telegram_request_feedback",
+    "title": "Request user feedback"
+  },
+  "arguments": {
+    "question": "Which rollout strategy should we apply?",
+    "context": "Production deployment for billing-api",
+    "options": [
+      "Canary for 10% traffic",
+      "Blue/green switch",
+      "Delay rollout"
+    ],
+    "allow_custom": true
+  },
+  "spec": {
+    "kind": "telegram_feedback_v1",
+    "options_min": 2,
+    "options_max": 5,
+    "custom_option_label": "Custom option"
+  },
+  "lang": "en",
+  "markup": "markdown",
+  "timeout_sec": 3600,
+  "callback": {
+    "url": "http://yaml-mcp-server.codex-system.svc.cluster.local/executors/webhook"
+  }
+}
+```
+
+Response:
+
+```json
+{
+  "status": "pending",
+  "result": "queued",
+  "correlation_id": "req-123"
+}
+```
+
+### Callback payload (to yaml-mcp-server)
+
+Success example:
+
+```json
+{
+  "correlation_id": "req-123",
+  "status": "success",
+  "result": {
+    "question": "Which rollout strategy should we apply?",
+    "selected_option": "Canary for 10% traffic",
+    "selected_index": 0,
+    "custom": false,
+    "input_mode": "button"
+  },
+  "tool": "telegram_request_feedback"
+}
+```
+
+Custom voice/text example has `custom=true` and `input_mode` set to `text` or `voice`.
+
+Error example:
+
+```json
+{
+  "correlation_id": "req-123",
+  "status": "error",
+  "result": "execution timeout",
+  "tool": "telegram_request_feedback"
+}
+```
+
+## Voice transcription
+
+If `TG_EXECUTOR_OPENAI_API_KEY` is set, voice messages are transcribed via OpenAI.
+
+`ffmpeg` is required:
+
+```bash
+sudo apt-get install -y ffmpeg
+```
+
+## Security notes
+
+- Service is stateless.
+- Only one configured chat can interact with requests.
+- Callback endpoint has no shared secret by default - protect it with network controls.
+
+## License
+
+See [LICENSE](LICENSE).
