@@ -2,7 +2,6 @@ package telegram
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -132,16 +131,12 @@ func (s *Service) SubmitExecution(ctx context.Context, req executions.Request, t
 }
 
 func (s *Service) renderMessage(req executions.Request) string {
-	payload, err := json.MarshalIndent(req.Arguments, "", "  ")
-	if err != nil {
-		payload = []byte("{}")
-	}
 	msg := s.messagesFor(req.Lang)
 	switch strings.ToLower(strings.TrimSpace(req.Markup)) {
 	case "html":
-		return renderHTML(msg, req, payload)
+		return renderHTML(msg, req)
 	default:
-		return renderMarkdown(msg, req, payload)
+		return renderMarkdown(msg, req)
 	}
 }
 
@@ -230,7 +225,7 @@ func parseMode(markup string) string {
 	}
 }
 
-func renderMarkdown(msg i18n.Messages, req executions.Request, payload []byte) string {
+func renderMarkdown(msg i18n.Messages, req executions.Request) string {
 	builder := &strings.Builder{}
 	builder.WriteString("*")
 	builder.WriteString(escapeMarkdownV2(msg.ExecutionTitle))
@@ -244,14 +239,6 @@ func renderMarkdown(msg i18n.Messages, req executions.Request, payload []byte) s
 	if strings.TrimSpace(actionTitle) == "" {
 		actionTitle = "Action"
 	}
-	paramsTitle := msg.SectionParams
-	if strings.TrimSpace(paramsTitle) == "" {
-		paramsTitle = msg.ExecutionParams
-	}
-	if strings.TrimSpace(paramsTitle) == "" {
-		paramsTitle = "Parameters"
-	}
-
 	builder.WriteString("*")
 	builder.WriteString(escapeMarkdownV2(contextTitle))
 	builder.WriteString("*\n")
@@ -302,17 +289,11 @@ func renderMarkdown(msg i18n.Messages, req executions.Request, payload []byte) s
 	builder.WriteString(escapeMarkdownV2(msg.ExecutionCorrelation))
 	builder.WriteString(":* `")
 	builder.WriteString(escapeMarkdownV2Code(req.CorrelationID))
-	builder.WriteString("`\n\n")
-
-	builder.WriteString("*")
-	builder.WriteString(escapeMarkdownV2(paramsTitle))
-	builder.WriteString("*\n\n```json\n")
-	builder.WriteString(escapeMarkdownV2CodeBlock(string(payload)))
-	builder.WriteString("\n```")
+	builder.WriteString("`")
 	return builder.String()
 }
 
-func renderHTML(msg i18n.Messages, req executions.Request, payload []byte) string {
+func renderHTML(msg i18n.Messages, req executions.Request) string {
 	builder := &strings.Builder{}
 	builder.WriteString("<b>")
 	builder.WriteString(htmlEscape(msg.ExecutionTitle))
@@ -326,14 +307,6 @@ func renderHTML(msg i18n.Messages, req executions.Request, payload []byte) strin
 	if strings.TrimSpace(actionTitle) == "" {
 		actionTitle = "Action"
 	}
-	paramsTitle := msg.SectionParams
-	if strings.TrimSpace(paramsTitle) == "" {
-		paramsTitle = msg.ExecutionParams
-	}
-	if strings.TrimSpace(paramsTitle) == "" {
-		paramsTitle = "Parameters"
-	}
-
 	builder.WriteString("<b>")
 	builder.WriteString(htmlEscape(contextTitle))
 	builder.WriteString("</b><br>")
@@ -384,13 +357,7 @@ func renderHTML(msg i18n.Messages, req executions.Request, payload []byte) strin
 	builder.WriteString(htmlEscape(msg.ExecutionCorrelation))
 	builder.WriteString(":</b> <code>")
 	builder.WriteString(htmlEscape(req.CorrelationID))
-	builder.WriteString("</code><br><br>")
-
-	builder.WriteString("<b>")
-	builder.WriteString(htmlEscape(paramsTitle))
-	builder.WriteString("</b><br><pre><code>")
-	builder.WriteString(htmlEscape(string(payload)))
-	builder.WriteString("</code></pre>")
+	builder.WriteString("</code>")
 	return builder.String()
 }
 
@@ -422,22 +389,6 @@ func escapeMarkdownV2(value string) string {
 }
 
 func escapeMarkdownV2Code(value string) string {
-	if value == "" {
-		return value
-	}
-	var builder strings.Builder
-	builder.Grow(len(value) * 2)
-	for _, r := range value {
-		switch r {
-		case '\\', '`':
-			builder.WriteByte('\\')
-		}
-		builder.WriteRune(r)
-	}
-	return builder.String()
-}
-
-func escapeMarkdownV2CodeBlock(value string) string {
 	if value == "" {
 		return value
 	}
